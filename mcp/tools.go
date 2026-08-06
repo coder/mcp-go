@@ -723,6 +723,9 @@ type ToolArgumentsSchema struct {
 	Properties           map[string]any `json:"properties"`
 	Required             []string       `json:"required,omitempty"`
 	AdditionalProperties any            `json:"additionalProperties,omitempty"`
+	// RawJSON contains the complete schema received during unmarshaling.
+	// MarshalJSON emits it when set. Clear it before marshaling typed field changes.
+	RawJSON json.RawMessage `json:"-"`
 }
 
 // ToolInputSchema remains a named type for retro-compatibility, so its JSON
@@ -763,6 +766,10 @@ func (tis *ToolArgumentsSchema) UnmarshalJSON(data []byte) error {
 
 // toolArgumentsSchemaMarshalJSON handles the fields stored in ToolArgumentsSchema when json.Marshaler is called
 func toolArgumentsSchemaMarshalJSON(tis ToolArgumentsSchema) ([]byte, error) {
+	if len(tis.RawJSON) > 0 {
+		return append([]byte(nil), tis.RawJSON...), nil
+	}
+
 	m := make(map[string]any)
 	m["type"] = tis.Type
 
@@ -812,6 +819,7 @@ func toolArgumentsSchemaUnmarshalJSON(data []byte, tis *ToolArgumentsSchema) err
 		tis.Defs = aux.Definitions
 	}
 
+	tis.RawJSON = append(json.RawMessage(nil), data...)
 	return nil
 }
 

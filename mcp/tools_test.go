@@ -1894,6 +1894,97 @@ func TestToolArgumentsSchema_UnmarshalPrefersDefs(t *testing.T) {
 	assert.NotContains(t, schema.Defs, "from_definitions")
 }
 
+func TestToolSchemasPreserveCompleteJSON(t *testing.T) {
+	const schemaJSON = `{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"$defs": {
+			"AttachmentID": {
+				"$anchor": "attachment-id",
+				"type": "integer",
+				"const": 9007199254740993
+			}
+		},
+		"type": "object",
+		"anyOf": [
+			{
+				"properties": {
+					"filename": {},
+					"content": {}
+				},
+				"required": ["filename", "content"]
+			},
+			{
+				"properties": {
+					"source_file_id": {"$ref": "#/$defs/AttachmentID"}
+				},
+				"required": ["source_file_id"]
+			}
+		],
+		"if": {"required": ["source_file_id"]},
+		"then": {"properties": {"verified": {"const": true}}},
+		"x-vendor-extension": {"enabled": true}
+	}`
+
+	t.Run("Input", func(t *testing.T) {
+		var schema ToolInputSchema
+		require.NoError(t, json.Unmarshal([]byte(schemaJSON), &schema))
+		assert.Equal(t, "object", schema.Type)
+		assert.Contains(t, schema.Defs, "AttachmentID")
+		assert.Nil(t, schema.Properties)
+		assert.JSONEq(t, schemaJSON, string(schema.RawJSON))
+
+		data, err := json.Marshal(schema)
+		require.NoError(t, err)
+		assert.JSONEq(t, schemaJSON, string(data))
+		assert.Contains(t, string(data), "9007199254740993")
+	})
+
+	t.Run("Output", func(t *testing.T) {
+		var schema ToolOutputSchema
+		require.NoError(t, json.Unmarshal([]byte(schemaJSON), &schema))
+		assert.Equal(t, "object", schema.Type)
+		assert.JSONEq(t, schemaJSON, string(schema.RawJSON))
+
+		data, err := json.Marshal(schema)
+		require.NoError(t, err)
+		assert.JSONEq(t, schemaJSON, string(data))
+	})
+}
+
+func TestToolArgumentsSchemaRawJSONIsCopied(t *testing.T) {
+	data := []byte(`{"type":"object","anyOf":[{"required":["value"]}]}`)
+	var schema ToolArgumentsSchema
+	require.NoError(t, json.Unmarshal(data, &schema))
+
+	for i := range data {
+		data[i] = 0
+	}
+	assert.JSONEq(t, `{"type":"object","anyOf":[{"required":["value"]}]}`, string(schema.RawJSON))
+}
+
+func TestToolArgumentsSchemaUsesTypedFieldsAfterClearingRawJSON(t *testing.T) {
+	var schema ToolArgumentsSchema
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"type": "object",
+		"anyOf": [{"required": ["original"]}]
+	}`), &schema))
+
+	schema.Properties = map[string]any{
+		"replacement": map[string]any{"type": "string"},
+	}
+
+	data, err := json.Marshal(schema)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "replacement")
+	assert.Contains(t, string(data), "anyOf")
+
+	schema.RawJSON = nil
+	data, err = json.Marshal(schema)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "replacement")
+	assert.NotContains(t, string(data), "anyOf")
+}
+
 func TestToolArgumentsSchema_MarshalRoundTrip(t *testing.T) {
 	// Test that marshaling and unmarshaling preserves definitions
 	original := ToolArgumentsSchema{
